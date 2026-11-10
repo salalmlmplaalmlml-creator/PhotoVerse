@@ -1,0 +1,1322 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PhotoVerse</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #000000;
+            color: #ffffff;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+            overflow: hidden; /* Prevent body bounce on iOS */
+        }
+        
+        /* Hide scrollbar for Chrome, Safari and Opera */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        /* Hide scrollbar for IE, Edge and Firefox */
+        .no-scrollbar {
+            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;  /* Firefox */
+        }
+
+        .grid-gallery {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 2px;
+        }
+
+        .photo-item {
+            aspect-ratio: 1 / 1;
+            background-color: #1c1c1e;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .photo-item img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: opacity 0.3s;
+        }
+
+        .bottom-nav {
+            background-color: rgba(18, 18, 18, 0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+
+        /* Editor Styles */
+        #editor-canvas-container {
+            width: 100%;
+            height: calc(100% - 120px); /* Leave space for top and bottom bars */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            position: relative;
+            touch-action: none; /* Crucial for drawing */
+        }
+
+        #editor-canvas {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        .tool-active {
+            color: #3b82f6; /* Tailwind blue-500 */
+        }
+
+        /* Toast Notifications */
+        #toast-container {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+        }
+        .toast {
+            background-color: rgba(44, 44, 46, 0.9);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 999px;
+            font-size: 14px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            animation: slideDown 0.3s ease forwards, fadeOut 0.3s ease 2.5s forwards;
+        }
+        @keyframes slideDown {
+            from { transform: translateY(-20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
+        }
+
+        /* Loaders */
+        .spinner {
+            border: 3px solid rgba(255,255,255,0.1);
+            border-top: 3px solid #fff;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="h-screen w-full flex flex-col relative text-sm">
+
+    <!-- Toast Notifications Container -->
+    <div id="toast-container"></div>
+
+    <!-- Hidden Camera & File Inputs -->
+    <input type="file" id="camera-upload" accept="image/*" capture="environment" class="hidden">
+
+    <!-- AUTHENTICATION VIEW -->
+    <div id="auth-view" class="flex-1 flex flex-col justify-center items-center h-full w-full px-6 bg-black z-50 fixed inset-0">
+        <div class="flex flex-col items-center mb-10">
+            <i class="ph-fill ph-camera text-6xl text-blue-500 mb-2"></i>
+            <h1 class="text-4xl font-bold text-white tracking-tight">PhotoVerse</h1>
+            <p class="text-gray-400 mt-2">Ваша личная фотогалерея</p>
+        </div>
+
+        <div id="config-warning" class="hidden bg-red-900/50 border border-red-500 text-red-200 p-4 rounded-xl mb-6 w-full max-w-sm text-sm text-center">
+            <strong>⚠️ Внимание:</strong><br>Вставьте ваши настройки Firebase (firebaseConfig) в код файла index.html, иначе база данных не будет работать.
+        </div>
+
+        <form id="auth-form" class="w-full max-w-sm flex flex-col gap-4">
+            <input type="email" id="auth-email" placeholder="Ваш Email" class="w-full p-4 rounded-xl bg-[#1c1c1e] text-white border border-gray-700 focus:border-blue-500 focus:outline-none" required>
+            <input type="password" id="auth-password" placeholder="Пароль" class="w-full p-4 rounded-xl bg-[#1c1c1e] text-white border border-gray-700 focus:border-blue-500 focus:outline-none" required>
+            <button type="submit" id="btn-login" class="w-full p-4 bg-blue-600 text-white font-bold rounded-xl active:bg-blue-700 transition">Войти</button>
+            <button type="button" id="btn-register" class="w-full p-4 bg-gray-800 text-white font-bold rounded-xl border border-gray-700 active:bg-gray-700 transition">Зарегистрироваться</button>
+        </form>
+    </div>
+
+    <!-- MAIN APP VIEW -->
+    <div id="main-view" class="hidden flex-1 flex-col h-full w-full">
+        <!-- Header -->
+        <header class="pt-12 pb-4 px-4 flex justify-between items-center bg-black sticky top-0 z-10">
+            <div class="flex items-center gap-2">
+                <button id="btn-back-to-albums" class="hidden text-blue-500 text-sm flex items-center gap-1 font-medium mr-2">
+                    <i class="ph ph-caret-left text-lg"></i> Альбомы
+                </button>
+                <h1 class="text-2xl font-bold tracking-tight" id="header-title">Фото</h1>
+            </div>
+            <div class="flex gap-4">
+                <button id="btn-logout" class="p-2 bg-gray-800 text-red-400 rounded-full active:scale-95 transition-transform" title="Выйти">
+                    <i class="ph ph-sign-out text-xl"></i>
+                </button>
+                <button id="btn-upload" class="p-2 bg-gray-800 rounded-full active:scale-95 transition-transform">
+                    <i class="ph ph-plus text-xl"></i>
+                    <input type="file" id="file-upload" accept="image/*" class="hidden" multiple>
+                </button>
+            </div>
+        </header>
+
+        <!-- Content Area -->
+        <main id="content-area" class="flex-1 overflow-y-auto no-scrollbar pb-24">
+            <!-- Photos Grid -->
+            <div id="photos-grid" class="grid-gallery w-full">
+                <!-- Loading state -->
+                <div class="col-span-3 flex justify-center py-20 text-gray-500">
+                    <div class="spinner"></div>
+                </div>
+            </div>
+            
+            <!-- Albums View -->
+            <div id="albums-view" class="hidden px-4 py-2 w-full space-y-4">
+                <div class="flex justify-between items-center">
+                    <span class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Мои альбомы</span>
+                    <button id="btn-create-album" class="text-xs text-blue-500 font-semibold flex items-center gap-1 bg-blue-500/10 px-3 py-1.5 rounded-full active:bg-blue-500/20">
+                        <i class="ph ph-plus-circle text-base"></i> Новый альбом
+                    </button>
+                </div>
+                
+                <div id="albums-grid" class="grid grid-cols-2 gap-4">
+                    <!-- Dynamic Albums will be rendered here -->
+                </div>
+            </div>
+        </main>
+
+        <!-- Bottom Navigation Tabs -->
+        <nav class="bottom-nav fixed bottom-0 w-full h-20 flex justify-around items-start pt-3 px-6 z-20 pb-safe">
+            <button class="nav-tab flex flex-col items-center gap-1 tool-active" data-target="photos">
+                <i class="ph-fill ph-image text-2xl"></i>
+                <span class="text-[10px] font-medium">Фото</span>
+            </button>
+            <button class="nav-tab flex flex-col items-center gap-1 text-gray-500" data-target="albums">
+                <i class="ph ph-folders text-2xl"></i>
+                <span class="text-[10px] font-medium">Альбомы</span>
+            </button>
+        </nav>
+    </div>
+
+    <!-- FULLSCREEN PHOTO VIEWER MODAL -->
+    <div id="viewer-modal" class="fixed inset-0 bg-black z-30 hidden flex-col transition-opacity duration-300 opacity-0">
+        <!-- Top Bar -->
+        <div class="absolute top-0 w-full p-4 pt-12 flex justify-between items-center z-40 bg-gradient-to-b from-black/60 to-transparent">
+            <button id="btn-viewer-close" class="p-2"><i class="ph ph-caret-left text-3xl"></i></button>
+            <div id="viewer-date" class="text-sm font-medium"></div>
+            <button id="btn-viewer-info" class="p-2" title="Сведения об изображении"><i class="ph ph-info text-2xl"></i></button>
+        </div>
+
+        <!-- Image Container -->
+        <div class="flex-1 w-full flex items-center justify-center overflow-hidden">
+            <img id="viewer-image" src="" alt="Full view" class="max-w-full max-h-full object-contain transition-transform duration-200">
+        </div>
+
+        <!-- Bottom Actions -->
+        <div class="absolute bottom-0 w-full h-24 bg-gradient-to-t from-black/80 to-transparent flex justify-around items-center px-4 pb-6 z-40">
+            <button class="flex flex-col items-center gap-1 p-2 text-gray-300 active:text-white" id="btn-viewer-share">
+                <i class="ph ph-share-network text-2xl"></i>
+            </button>
+            <button class="flex flex-col items-center gap-1 p-2 text-gray-300 active:text-white" id="btn-viewer-edit">
+                <i class="ph ph-faders text-2xl"></i>
+            </button>
+            <button class="flex flex-col items-center gap-1 p-2 text-gray-300 active:text-white" id="btn-viewer-delete">
+                <i class="ph ph-trash text-2xl"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- INFO MODAL (Сведения о снимке) -->
+    <div id="info-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex flex-col justify-end sm:justify-center items-center p-4">
+        <div class="bg-[#1c1c1e] border border-white/10 rounded-3xl w-full max-w-sm p-6 flex flex-col gap-4 relative shadow-2xl animate-in fade-in zoom-in duration-200">
+            <button id="btn-info-close" class="absolute top-4 right-4 text-gray-400 hover:text-white p-1">
+                <i class="ph ph-x text-2xl"></i>
+            </button>
+            <div class="flex items-center gap-3 border-b border-white/10 pb-4">
+                <i class="ph-fill ph-info text-3xl text-blue-500"></i>
+                <div>
+                    <h3 class="font-bold text-lg text-white">Сведения о фото</h3>
+                    <p class="text-xs text-gray-400">Технические данные файла</p>
+                </div>
+            </div>
+            <div class="space-y-3 text-sm">
+                <div class="flex justify-between items-center py-1 border-b border-white/5">
+                    <span class="text-gray-400">Дата и время:</span>
+                    <span id="info-date" class="font-medium text-white">-</span>
+                </div>
+                <div class="flex justify-between items-center py-1 border-b border-white/5">
+                    <span class="text-gray-400">Размер (вес):</span>
+                    <span id="info-size" class="font-medium text-white">-</span>
+                </div>
+                <div class="flex justify-between items-center py-1 border-b border-white/5">
+                    <span class="text-gray-400">Разрешение:</span>
+                    <span id="info-dimensions" class="font-medium text-white">-</span>
+                </div>
+                <div class="flex justify-between items-center py-1 border-b border-white/5">
+                    <span class="text-gray-400">Альбом:</span>
+                    <select id="info-album-select" class="bg-[#2c2c2e] text-blue-400 font-medium rounded-lg px-2 py-1 border border-white/10 focus:outline-none text-xs">
+                        <!-- Dynamic options -->
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CREATE ALBUM MODAL -->
+    <div id="create-album-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex flex-col justify-center items-center p-4">
+        <div class="bg-[#1c1c1e] border border-white/10 rounded-3xl w-full max-w-sm p-6 flex flex-col gap-4 shadow-2xl">
+            <h3 class="font-bold text-lg text-white">Создать новый альбом</h3>
+            <input type="text" id="new-album-name" placeholder="Название альбома" class="w-full p-3 rounded-xl bg-[#2c2c2e] text-white border border-gray-700 focus:border-blue-500 focus:outline-none">
+            <div class="flex gap-2 justify-end mt-2">
+                <button id="btn-cancel-album" class="px-4 py-2 bg-gray-800 text-gray-300 rounded-xl font-medium active:bg-gray-700">Отмена</button>
+                <button id="btn-save-album" class="px-4 py-2 bg-blue-600 text-white rounded-xl font-medium active:bg-blue-700">Создать</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- EDITOR MODAL -->
+    <div id="editor-modal" class="fixed inset-0 bg-black z-50 hidden flex-col transition-opacity duration-300 opacity-0">
+        <!-- Top Bar -->
+        <div class="h-16 flex justify-between items-center px-4 bg-[#121212] flex-shrink-0 pt-safe">
+            <button id="btn-editor-cancel" class="text-gray-400 p-2"><i class="ph ph-x text-2xl"></i></button>
+            <span class="font-medium" id="editor-mode-title">Редактор</span>
+            <button id="btn-editor-save" class="text-blue-500 font-semibold p-2">Сохранить</button>
+        </div>
+
+        <!-- Canvas Area -->
+        <div id="editor-canvas-container" class="bg-[#0a0a0a]">
+            <canvas id="editor-canvas"></canvas>
+        </div>
+
+        <!-- Editor Tool Sub-menus (Overlays) -->
+        <div id="tool-options-container" class="absolute bottom-[80px] w-full bg-[#1c1c1e]/90 backdrop-blur-md hidden border-t border-white/10 rounded-t-2xl px-6 py-4 flex-col gap-4">
+            
+            <!-- Adjust Options -->
+            <div id="options-adjust" class="hidden flex-col gap-4 w-full">
+                <div class="flex items-center gap-4">
+                    <i class="ph ph-sun text-xl text-gray-400"></i>
+                    <input type="range" id="slider-brightness" min="-100" max="100" value="0" class="w-full accent-white">
+                </div>
+                <div class="flex items-center gap-4">
+                    <i class="ph ph-circle-half-tilt text-xl text-gray-400"></i>
+                    <input type="range" id="slider-contrast" min="-100" max="100" value="0" class="w-full accent-white">
+                </div>
+                <div class="flex items-center gap-4">
+                     <i class="ph ph-drop text-xl text-gray-400"></i>
+                     <input type="range" id="slider-saturation" min="-100" max="100" value="0" class="w-full accent-white">
+                </div>
+                <div class="flex justify-between w-full mt-2">
+                    <button id="btn-apply-adjust" class="w-full bg-white text-black py-2 rounded-lg font-medium">Применить фильтр</button>
+                </div>
+            </div>
+
+            <!-- Draw Options -->
+            <div id="options-draw" class="hidden flex-col gap-4 w-full">
+                <div class="flex justify-between px-4">
+                    <button class="color-picker w-8 h-8 rounded-full bg-white border-2 border-transparent focus:border-blue-500" data-color="#ffffff"></button>
+                    <button class="color-picker w-8 h-8 rounded-full bg-red-500 border-2 border-transparent focus:border-blue-500" data-color="#ef4444"></button>
+                    <button class="color-picker w-8 h-8 rounded-full bg-blue-500 border-2 border-transparent focus:border-blue-500" data-color="#3b82f6"></button>
+                    <button class="color-picker w-8 h-8 rounded-full bg-green-500 border-2 border-transparent focus:border-blue-500" data-color="#22c55e"></button>
+                    <button class="color-picker w-8 h-8 rounded-full bg-yellow-500 border-2 border-transparent focus:border-blue-500" data-color="#eab308"></button>
+                </div>
+                <div class="flex items-center gap-4 mt-2">
+                    <i class="ph ph-scribble-loop text-xl text-gray-400"></i>
+                    <input type="range" id="slider-brush-size" min="1" max="20" value="5" class="w-full accent-white">
+                </div>
+                 <div class="flex justify-between w-full mt-2 gap-2">
+                     <button id="btn-undo-draw" class="flex-1 bg-gray-700 text-white py-2 rounded-lg font-medium">Отменить</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Bottom Toolbar -->
+        <div class="h-20 bg-[#121212] flex justify-around items-center pb-safe border-t border-white/10 z-20">
+             <button class="editor-tool flex flex-col items-center gap-1 p-2 text-gray-400" data-tool="adjust">
+                <i class="ph ph-sliders text-2xl"></i>
+                <span class="text-[10px]">Коррекция</span>
+            </button>
+             <button class="editor-tool flex flex-col items-center gap-1 p-2 text-gray-400" data-tool="rotate">
+                <i class="ph ph-arrow-counter-clockwise text-2xl"></i>
+                <span class="text-[10px]">Поворот</span>
+            </button>
+             <button class="editor-tool flex flex-col items-center gap-1 p-2 text-gray-400" data-tool="draw">
+                <i class="ph ph-pencil-simple text-2xl"></i>
+                <span class="text-[10px]">Рисование</span>
+            </button>
+            <button class="editor-tool flex flex-col items-center gap-1 p-2 text-gray-400" data-tool="crop">
+                <i class="ph ph-crop text-2xl"></i>
+                <span class="text-[10px]">Обрезка 1:1</span>
+            </button>
+        </div>
+    </div>
+
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, getDocs, doc, deleteDoc, updateDoc, query, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyASkJ1yXHrgkkg0fGIGy_6tm3uatQcYeGc",
+            authDomain: "photoverse-efd8d.firebaseapp.com",
+            projectId: "photoverse-efd8d",
+            storageBucket: "photoverse-efd8d.firebasestorage.app",
+            messagingSenderId: "64948399028",
+            appId: "1:64948399028:web:902626d80995287731a0e1",
+            measurementId: "G-NX9EVPNTTV"
+        };
+        
+        const appId = 'photoverse-local-app'; 
+        
+        let app, auth, db;
+        let currentUser = null;
+        let photos = [];
+        let customAlbums = [];
+        let currentViewingPhoto = null;
+        let activeAlbumFilter = null; // null = all photos, 'Загрузки', 'Камера', or custom album name
+
+        // --- DOM Elements ---
+        const els = {
+            photosGrid: document.getElementById('photos-grid'),
+            albumsView: document.getElementById('albums-view'),
+            albumsGrid: document.getElementById('albums-grid'),
+            navTabs: document.querySelectorAll('.nav-tab'),
+            headerTitle: document.getElementById('header-title'),
+            btnBackToAlbums: document.getElementById('btn-back-to-albums'),
+            fileUpload: document.getElementById('file-upload'),
+            cameraUpload: document.getElementById('camera-upload'),
+            btnUpload: document.getElementById('btn-upload'),
+            
+            // Viewer
+            viewerModal: document.getElementById('viewer-modal'),
+            viewerImage: document.getElementById('viewer-image'),
+            viewerDate: document.getElementById('viewer-date'),
+            btnViewerClose: document.getElementById('btn-viewer-close'),
+            btnViewerDelete: document.getElementById('btn-viewer-delete'),
+            btnViewerEdit: document.getElementById('btn-viewer-edit'),
+            btnViewerShare: document.getElementById('btn-viewer-share'),
+            btnViewerInfo: document.getElementById('btn-viewer-info'),
+
+            // Info Modal
+            infoModal: document.getElementById('info-modal'),
+            btnInfoClose: document.getElementById('btn-info-close'),
+            infoDate: document.getElementById('info-date'),
+            infoSize: document.getElementById('info-size'),
+            infoDimensions: document.getElementById('info-dimensions'),
+            infoAlbumSelect: document.getElementById('info-album-select'),
+
+            // Albums Creation
+            btnCreateAlbum: document.getElementById('btn-create-album'),
+            createAlbumModal: document.getElementById('create-album-modal'),
+            newAlbumName: document.getElementById('new-album-name'),
+            btnCancelAlbum: document.getElementById('btn-cancel-album'),
+            btnSaveAlbum: document.getElementById('btn-save-album'),
+            
+            // Editor
+            editorModal: document.getElementById('editor-modal'),
+            editorCanvas: document.getElementById('editor-canvas'),
+            btnEditorCancel: document.getElementById('btn-editor-cancel'),
+            btnEditorSave: document.getElementById('btn-editor-save'),
+            editorTools: document.querySelectorAll('.editor-tool'),
+            toolOptionsContainer: document.getElementById('tool-options-container'),
+            editorModeTitle: document.getElementById('editor-mode-title'),
+            
+            // Editor Sub-tools
+            optionsAdjust: document.getElementById('options-adjust'),
+            optionsDraw: document.getElementById('options-draw'),
+            sliderBrightness: document.getElementById('slider-brightness'),
+            sliderContrast: document.getElementById('slider-contrast'),
+            sliderSaturation: document.getElementById('slider-saturation'),
+            btnApplyAdjust: document.getElementById('btn-apply-adjust'),
+            colorPickers: document.querySelectorAll('.color-picker'),
+            sliderBrushSize: document.getElementById('slider-brush-size'),
+            btnUndoDraw: document.getElementById('btn-undo-draw'),
+            
+            // Auth Elements
+            authView: document.getElementById('auth-view'),
+            mainView: document.getElementById('main-view'),
+            authForm: document.getElementById('auth-form'),
+            authEmail: document.getElementById('auth-email'),
+            authPassword: document.getElementById('auth-password'),
+            btnLogin: document.getElementById('btn-login'),
+            btnRegister: document.getElementById('btn-register'),
+            btnLogout: document.getElementById('btn-logout'),
+            configWarning: document.getElementById('config-warning'),
+        };
+
+        // --- Editor State ---
+        let editorCtx = els.editorCanvas.getContext('2d');
+        let originalImageObj = new Image();
+        let drawHistory = []; 
+        let isDrawing = false;
+        let currentTool = null;
+        let brushColor = '#ffffff';
+        let brushSize = 5;
+        let imageRotation = 0; 
+        
+        let adjustments = { brightness: 0, contrast: 0, saturation: 0 };
+        let baseImageSrc = ''; 
+
+        // --- Initialization ---
+        async function init() {
+            if (firebaseConfig.apiKey === "ТВОЙ_API_KEY" || !firebaseConfig.apiKey) {
+                els.configWarning.classList.remove('hidden');
+            }
+
+            try {
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        currentUser = user;
+                        els.authView.classList.add('hidden');
+                        els.mainView.classList.remove('hidden');
+                        els.mainView.classList.add('flex');
+                        loadPhotos();
+                        loadAlbums();
+                    } else {
+                        currentUser = null;
+                        els.authView.classList.remove('hidden');
+                        els.mainView.classList.add('hidden');
+                        els.mainView.classList.remove('flex');
+                        photos = [];
+                        customAlbums = [];
+                        renderGallery();
+                    }
+                });
+
+            } catch (error) {
+                console.error("Init error:", error);
+                showToast("Ошибка запуска Firebase.");
+            }
+            setupEventListeners();
+        }
+
+        // --- Auth Functions ---
+        async function handleLogin(e) {
+            e.preventDefault();
+            const email = els.authEmail.value;
+            const password = els.authPassword.value;
+            try {
+                showToast("Вход...");
+                await signInWithEmailAndPassword(auth, email, password);
+                showToast("Успешный вход!");
+            } catch (error) {
+                console.error("Login error:", error);
+                showToast("Ошибка входа.");
+            }
+        }
+
+        async function handleRegister() {
+            const email = els.authEmail.value;
+            const password = els.authPassword.value;
+            if (!email || !password) {
+                showToast("Введите Email и пароль");
+                return;
+            }
+            try {
+                showToast("Регистрация...");
+                await createUserWithEmailAndPassword(auth, email, password);
+                showToast("Регистрация успешна!");
+            } catch (error) {
+                console.error("Register error:", error);
+                showToast("Ошибка регистрации.");
+            }
+        }
+
+        // --- Utility Functions ---
+        function showToast(message) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => {
+                if(toast.parentElement) toast.remove();
+            }, 3000);
+        }
+
+        function formatDate(timestamp) {
+            if (!timestamp) return '';
+            const date = new Date(timestamp);
+            return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute:'2-digit' });
+        }
+
+        function compressImage(file, maxSize = 1024) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        let width = img.width;
+                        let height = img.height;
+
+                        if (width > height) {
+                            if (width > maxSize) {
+                                height = Math.round(height * (maxSize / width));
+                                width = maxSize;
+                            }
+                        } else {
+                            if (height > maxSize) {
+                                width = Math.round(width * (maxSize / height));
+                                height = maxSize;
+                            }
+                        }
+
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+                        resolve(canvas.toDataURL('image/jpeg', 0.7));
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // --- Data Operations (Firebase) ---
+        function getPhotosCollectionRef() {
+            if (!currentUser) return null;
+            return collection(db, 'artifacts', appId, 'users', currentUser.uid, 'photos');
+        }
+
+        function getAlbumsCollectionRef() {
+            if (!currentUser) return null;
+            return collection(db, 'artifacts', appId, 'users', currentUser.uid, 'albums');
+        }
+
+        async function loadPhotos() {
+            if (!currentUser) return;
+            const photosRef = getPhotosCollectionRef();
+            try {
+                onSnapshot(photosRef, (snapshot) => {
+                    photos = [];
+                    snapshot.forEach((doc) => {
+                        photos.push({ id: doc.id, ...doc.data() });
+                    });
+                    photos.sort((a, b) => b.timestamp - a.timestamp);
+                    renderGallery();
+                    renderAlbums();
+                });
+            } catch (e) {
+                console.error("Firestore Error:", e);
+            }
+        }
+
+        async function loadAlbums() {
+            if (!currentUser) return;
+            const albumsRef = getAlbumsCollectionRef();
+            try {
+                onSnapshot(albumsRef, (snapshot) => {
+                    customAlbums = [];
+                    snapshot.forEach((doc) => {
+                        customAlbums.push({ id: doc.id, ...doc.data() });
+                    });
+                    renderAlbums();
+                });
+            } catch (e) {
+                console.error("Albums load error:", e);
+            }
+        }
+
+        async function uploadPhoto(file, targetAlbum = 'Загрузки') {
+            if (!currentUser) {
+                showToast("Требуется авторизация");
+                return;
+            }
+            
+            showToast("Загрузка...");
+            try {
+                const dataUrl = await compressImage(file);
+                const photosRef = getPhotosCollectionRef();
+                await addDoc(photosRef, {
+                    dataUrl: dataUrl,
+                    timestamp: Date.now(),
+                    album: targetAlbum,
+                    type: 'image'
+                });
+                showToast("Фото сохранено в «" + targetAlbum + "»");
+            } catch (error) {
+                console.error("Upload error:", error);
+                showToast("Ошибка сохранения фото");
+            }
+        }
+
+        async function deleteCurrentPhoto() {
+            if (!currentUser || !currentViewingPhoto) return;
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'photos', currentViewingPhoto.id);
+                await deleteDoc(docRef);
+                closeViewer();
+                showToast("Фото удалено");
+            } catch (error) {
+                console.error("Delete error:", error);
+                showToast("Ошибка при удалении");
+            }
+        }
+
+        async function updatePhotoAlbum(photoId, newAlbum) {
+            if (!currentUser || !photoId) return;
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'photos', photoId);
+                await updateDoc(docRef, { album: newAlbum });
+                if (currentViewingPhoto) currentViewingPhoto.album = newAlbum;
+                showToast("Перемещено в альбом «" + newAlbum + "»");
+            } catch (e) {
+                console.error("Album update error:", e);
+                showToast("Ошибка перемещения");
+            }
+        }
+
+        async function saveEditedPhoto(dataUrl) {
+             if (!currentUser || !currentViewingPhoto) return;
+             showToast("Сохранение изменений...");
+             try {
+                const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'photos', currentViewingPhoto.id);
+                await updateDoc(docRef, {
+                    dataUrl: dataUrl,
+                    timestamp: Date.now()
+                });
+                showToast("Изменения сохранены");
+                els.viewerImage.src = dataUrl;
+                currentViewingPhoto.dataUrl = dataUrl;
+             } catch (error) {
+                 console.error("Save edit error:", error);
+                 showToast("Ошибка сохранения");
+             }
+        }
+
+        // --- UI Rendering ---
+        function renderGallery() {
+            els.photosGrid.innerHTML = '';
+            
+            let filteredPhotos = photos;
+            if (activeAlbumFilter) {
+                filteredPhotos = photos.filter(p => (p.album || 'Загрузки') === activeAlbumFilter);
+            }
+
+            if (filteredPhotos.length === 0) {
+                els.photosGrid.innerHTML = `
+                    <div class="col-span-3 flex flex-col items-center justify-center py-32 text-gray-500 gap-4">
+                        <i class="ph ph-camera-slash text-5xl"></i>
+                        <p>${activeAlbumFilter ? 'В альбоме «' + activeAlbumFilter + '» нет фото' : 'Нет фотографий'}</p>
+                    </div>
+                `;
+                return;
+            }
+
+            filteredPhotos.forEach(photo => {
+                const div = document.createElement('div');
+                div.className = 'photo-item cursor-pointer';
+                div.innerHTML = `<img src="${photo.dataUrl}" alt="Photo" loading="lazy">`;
+                div.onclick = () => openViewer(photo);
+                els.photosGrid.appendChild(div);
+            });
+        }
+
+        function renderAlbums() {
+            els.albumsGrid.innerHTML = '';
+
+            // 1. Built-in Camera Tile
+            const cameraCount = photos.filter(p => p.album === 'Камера').length;
+            const cameraTile = document.createElement('div');
+            cameraTile.className = 'bg-[#1c1c1e] rounded-2xl aspect-square p-4 flex flex-col justify-end relative overflow-hidden cursor-pointer border border-white/5 active:scale-95 transition-transform';
+            cameraTile.innerHTML = `
+                <div class="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent z-10"></div>
+                <div class="absolute inset-0 w-full h-full flex items-center justify-center text-blue-500 bg-[#2c2c2c]">
+                    <i class="ph ph-camera text-5xl"></i>
+                </div>
+                <div class="relative z-20">
+                    <h3 class="font-semibold text-lg text-white">Камера</h3>
+                    <p class="text-xs text-gray-400">${cameraCount} фото • Нажмите для снимка</p>
+                </div>
+            `;
+            cameraTile.onclick = () => {
+                els.cameraUpload.click();
+            };
+            els.albumsGrid.appendChild(cameraTile);
+
+            // 2. Built-in Downloads (Загрузки) Tile
+            const downloadsCount = photos.filter(p => (!p.album || p.album === 'Загрузки')).length;
+            const lastPhoto = photos.find(p => !p.album || p.album === 'Загрузки');
+            const downloadsTile = document.createElement('div');
+            downloadsTile.className = 'bg-[#1c1c1e] rounded-2xl aspect-square p-4 flex flex-col justify-end relative overflow-hidden cursor-pointer border border-white/5 active:scale-95 transition-transform';
+            downloadsTile.innerHTML = `
+                <div class="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent z-10"></div>
+                ${lastPhoto ? `<img src="${lastPhoto.dataUrl}" class="absolute inset-0 w-full h-full object-cover" alt="Cover">` : 
+                `<div class="absolute inset-0 w-full h-full flex items-center justify-center text-gray-600 bg-[#2c2c2c]"><i class="ph ph-download-simple text-4xl"></i></div>`}
+                <div class="relative z-20">
+                    <h3 class="font-semibold text-lg text-white">Загрузки</h3>
+                    <p class="text-xs text-gray-400">${downloadsCount} фото</p>
+                </div>
+            `;
+            downloadsTile.onclick = () => openAlbumFilter('Загрузки');
+            els.albumsGrid.appendChild(downloadsTile);
+
+            // 3. Custom User Albums
+            customAlbums.forEach(album => {
+                const count = photos.filter(p => p.album === album.name).length;
+                const albumPhoto = photos.find(p => p.album === album.name);
+                const tile = document.createElement('div');
+                tile.className = 'bg-[#1c1c1e] rounded-2xl aspect-square p-4 flex flex-col justify-end relative overflow-hidden cursor-pointer border border-white/5 active:scale-95 transition-transform';
+                tile.innerHTML = `
+                    <div class="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent z-10"></div>
+                    ${albumPhoto ? `<img src="${albumPhoto.dataUrl}" class="absolute inset-0 w-full h-full object-cover" alt="Cover">` : 
+                    `<div class="absolute inset-0 w-full h-full flex items-center justify-center text-gray-500 bg-[#2c2c2c]"><i class="ph ph-folder text-4xl"></i></div>`}
+                    <div class="relative z-20">
+                        <h3 class="font-semibold text-lg text-white">${album.name}</h3>
+                        <p class="text-xs text-gray-400">${count} фото</p>
+                    </div>
+                `;
+                tile.onclick = () => openAlbumFilter(album.name);
+                els.albumsGrid.appendChild(tile);
+            });
+        }
+
+        function openAlbumFilter(albumName) {
+            activeAlbumFilter = albumName;
+            els.headerTitle.textContent = albumName;
+            els.btnBackToAlbums.classList.remove('hidden');
+            els.albumsView.classList.add('hidden');
+            els.photosGrid.classList.remove('hidden');
+            renderGallery();
+        }
+
+        // --- Navigation ---
+        function switchTab(target) {
+            activeAlbumFilter = null;
+            els.btnBackToAlbums.classList.add('hidden');
+
+            els.navTabs.forEach(tab => {
+                const icon = tab.querySelector('i');
+                if (tab.dataset.target === target) {
+                    tab.classList.add('tool-active');
+                    tab.classList.remove('text-gray-500');
+                    icon.classList.replace('ph', 'ph-fill');
+                } else {
+                    tab.classList.remove('tool-active');
+                    tab.classList.add('text-gray-500');
+                    icon.classList.replace('ph-fill', 'ph');
+                }
+            });
+
+            if (target === 'photos') {
+                els.photosGrid.classList.remove('hidden');
+                els.albumsView.classList.add('hidden');
+                els.headerTitle.textContent = 'Фото';
+                renderGallery();
+            } else {
+                els.photosGrid.classList.add('hidden');
+                els.albumsView.classList.remove('hidden');
+                els.headerTitle.textContent = 'Альбомы';
+                renderAlbums();
+            }
+        }
+
+        // --- Viewer ---
+        function openViewer(photo) {
+            currentViewingPhoto = photo;
+            els.viewerImage.src = photo.dataUrl;
+            els.viewerDate.textContent = formatDate(photo.timestamp);
+            
+            els.viewerModal.classList.remove('hidden');
+            void els.viewerModal.offsetWidth;
+            els.viewerModal.classList.remove('opacity-0');
+        }
+
+        function closeViewer() {
+            els.viewerModal.classList.add('opacity-0');
+            setTimeout(() => {
+                els.viewerModal.classList.add('hidden');
+                currentViewingPhoto = null;
+                els.viewerImage.src = '';
+            }, 300);
+        }
+
+        // --- Info Modal (Сведения о снимке) ---
+        function openInfoModal() {
+            if (!currentViewingPhoto) return;
+            
+            els.infoDate.textContent = formatDate(currentViewingPhoto.timestamp);
+            
+            // Calculate size from DataURL base64
+            const sizeInBytes = Math.round((currentViewingPhoto.dataUrl.length * 3) / 4);
+            const sizeInKb = (sizeInBytes / 1024).toFixed(1);
+            els.infoSize.textContent = sizeInKb > 1024 ? (sizeInKb / 1024).toFixed(2) + ' МБ' : sizeInKb + ' КБ';
+
+            // Get image resolution
+            const img = new Image();
+            img.onload = () => {
+                els.infoDimensions.textContent = `${img.naturalWidth} × ${img.naturalHeight} px`;
+            };
+            img.src = currentViewingPhoto.dataUrl;
+
+            // Populate album options
+            els.infoAlbumSelect.innerHTML = '';
+            const albumList = ['Загрузки', 'Камера', ...customAlbums.map(a => a.name)];
+            albumList.forEach(albumName => {
+                const opt = document.createElement('option');
+                opt.value = albumName;
+                opt.textContent = albumName;
+                if ((currentViewingPhoto.album || 'Загрузки') === albumName) {
+                    opt.selected = true;
+                }
+                els.infoAlbumSelect.appendChild(opt);
+            });
+
+            els.infoModal.classList.remove('hidden');
+        }
+
+        function closeInfoModal() {
+            els.infoModal.classList.add('hidden');
+        }
+
+        // --- Editor Core Logic ---
+        function openEditor() {
+            if (!currentViewingPhoto) return;
+            baseImageSrc = currentViewingPhoto.dataUrl;
+            adjustments = { brightness: 0, contrast: 0, saturation: 0 };
+            imageRotation = 0;
+            drawHistory = [];
+            resetEditorUI();
+            
+            loadImageToCanvas(baseImageSrc).then(() => {
+                saveCanvasState();
+            });
+
+            els.editorModal.classList.remove('hidden');
+            void els.editorModal.offsetWidth;
+            els.editorModal.classList.remove('opacity-0');
+        }
+
+        function closeEditor() {
+            els.editorModal.classList.add('opacity-0');
+            setTimeout(() => {
+                els.editorModal.classList.add('hidden');
+                deactivateTools();
+                baseImageSrc = '';
+            }, 300);
+        }
+
+        function resetEditorUI() {
+            els.sliderBrightness.value = 0;
+            els.sliderContrast.value = 0;
+            els.sliderSaturation.value = 0;
+            els.sliderBrushSize.value = 5;
+            brushColor = '#ffffff';
+            updateColorPickers();
+        }
+
+        function updateColorPickers() {
+            els.colorPickers.forEach(btn => {
+                if (btn.dataset.color === brushColor) {
+                    btn.classList.add('border-blue-500');
+                    btn.classList.remove('border-transparent');
+                } else {
+                    btn.classList.remove('border-blue-500');
+                    btn.classList.add('border-transparent');
+                }
+            });
+        }
+
+        async function loadImageToCanvas(src) {
+            return new Promise((resolve) => {
+                originalImageObj.onload = () => {
+                    if (imageRotation % 180 !== 0) {
+                        els.editorCanvas.width = originalImageObj.height;
+                        els.editorCanvas.height = originalImageObj.width;
+                    } else {
+                        els.editorCanvas.width = originalImageObj.width;
+                        els.editorCanvas.height = originalImageObj.height;
+                    }
+                    renderCanvasContent();
+                    resolve();
+                };
+                originalImageObj.src = src;
+            });
+        }
+
+        function renderCanvasContent() {
+            const w = els.editorCanvas.width;
+            const h = els.editorCanvas.height;
+            editorCtx.clearRect(0, 0, w, h);
+            editorCtx.save();
+            editorCtx.translate(w / 2, h / 2);
+            editorCtx.rotate((imageRotation * Math.PI) / 180);
+            
+            let drawW = originalImageObj.width;
+            let drawH = originalImageObj.height;
+            
+            const b = 100 + parseInt(adjustments.brightness);
+            const c = 100 + parseInt(adjustments.contrast);
+            const s = 100 + parseInt(adjustments.saturation);
+            
+            editorCtx.filter = `brightness(${b}%) contrast(${c}%) saturate(${s}%)`;
+            editorCtx.drawImage(originalImageObj, -drawW / 2, -drawH / 2, drawW, drawH);
+            editorCtx.restore();
+        }
+
+        function deactivateTools() {
+            els.editorTools.forEach(t => {
+                t.classList.remove('text-white');
+                t.classList.add('text-gray-400');
+            });
+            els.toolOptionsContainer.classList.add('hidden');
+            els.optionsAdjust.classList.add('hidden');
+            els.optionsDraw.classList.add('hidden');
+            currentTool = null;
+            els.editorModeTitle.textContent = "Редактор";
+            els.editorCanvas.style.cursor = 'default';
+        }
+
+        function activateTool(toolName, btnElement) {
+            if (currentTool === toolName) {
+                deactivateTools();
+                return;
+            }
+            
+            deactivateTools();
+            currentTool = toolName;
+            
+            btnElement.classList.remove('text-gray-400');
+            btnElement.classList.add('text-white');
+            els.toolOptionsContainer.classList.remove('hidden');
+
+            switch(toolName) {
+                case 'adjust':
+                    els.editorModeTitle.textContent = "Коррекция";
+                    els.optionsAdjust.classList.remove('hidden');
+                    els.optionsDraw.classList.add('hidden');
+                    break;
+                case 'draw':
+                    els.editorModeTitle.textContent = "Рисование";
+                    els.optionsDraw.classList.remove('hidden');
+                    els.optionsAdjust.classList.add('hidden');
+                    els.editorCanvas.style.cursor = 'crosshair';
+                    break;
+                case 'rotate':
+                    els.toolOptionsContainer.classList.add('hidden');
+                    imageRotation = (imageRotation + 90) % 360;
+                    const temp = els.editorCanvas.width;
+                    els.editorCanvas.width = els.editorCanvas.height;
+                    els.editorCanvas.height = temp;
+                    renderCanvasContent();
+                    drawHistory = []; 
+                    deactivateTools();
+                    break;
+                case 'crop':
+                     els.toolOptionsContainer.classList.add('hidden');
+                     applyCenterCrop();
+                     deactivateTools();
+                     break;
+            }
+        }
+
+        function applyCenterCrop() {
+             const w = els.editorCanvas.width;
+             const h = els.editorCanvas.height;
+             const size = Math.min(w, h);
+             const sx = (w - size) / 2;
+             const sy = (h - size) / 2;
+             
+             const tempCanvas = document.createElement('canvas');
+             tempCanvas.width = size;
+             tempCanvas.height = size;
+             const tempCtx = tempCanvas.getContext('2d');
+             
+             tempCtx.drawImage(els.editorCanvas, sx, sy, size, size, 0, 0, size, size);
+             
+             const newSrc = tempCanvas.toDataURL('image/jpeg', 1.0);
+             baseImageSrc = newSrc;
+             originalImageObj.src = newSrc;
+             
+             imageRotation = 0;
+             adjustments = { brightness: 0, contrast: 0, saturation: 0 };
+             resetEditorUI();
+             
+             originalImageObj.onload = () => {
+                  els.editorCanvas.width = size;
+                  els.editorCanvas.height = size;
+                  renderCanvasContent();
+                  drawHistory = [];
+             };
+             showToast("Ообрезано 1:1");
+        }
+
+        // --- Drawing Implementation ---
+        let lastX = 0;
+        let lastY = 0;
+
+        function getMousePos(canvas, evt) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+
+            let clientX, clientY;
+            if (evt.touches && evt.touches.length > 0) {
+                clientX = evt.touches[0].clientX;
+                clientY = evt.touches[0].clientY;
+            } else {
+                clientX = evt.clientX;
+                clientY = evt.clientY;
+            }
+
+            return {
+                x: (clientX - rect.left) * scaleX,
+                y: (clientY - rect.top) * scaleY
+            };
+        }
+
+        function startDrawing(e) {
+            if (currentTool !== 'draw') return;
+            e.preventDefault();
+            isDrawing = true;
+            const pos = getMousePos(els.editorCanvas, e);
+            lastX = pos.x;
+            lastY = pos.y;
+            
+            editorCtx.beginPath();
+            editorCtx.fillStyle = brushColor;
+            editorCtx.arc(lastX, lastY, brushSize / 2, 0, Math.PI * 2);
+            editorCtx.fill();
+            editorCtx.closePath();
+        }
+
+        function draw(e) {
+            if (!isDrawing || currentTool !== 'draw') return;
+            e.preventDefault();
+            const pos = getMousePos(els.editorCanvas, e);
+            
+            editorCtx.beginPath();
+            editorCtx.lineCap = 'round';
+            editorCtx.lineJoin = 'round';
+            editorCtx.strokeStyle = brushColor;
+            editorCtx.lineWidth = brushSize;
+            editorCtx.moveTo(lastX, lastY);
+            editorCtx.lineTo(pos.x, pos.y);
+            editorCtx.stroke();
+            editorCtx.closePath();
+            
+            lastX = pos.x;
+            lastY = pos.y;
+        }
+
+        function stopDrawing() {
+            if (isDrawing && currentTool === 'draw') {
+                isDrawing = false;
+                saveCanvasState();
+            }
+        }
+
+        function saveCanvasState() {
+            if (drawHistory.length > 10) drawHistory.shift();
+            drawHistory.push(els.editorCanvas.toDataURL());
+        }
+
+        function undoDraw() {
+            if (drawHistory.length > 1) {
+                drawHistory.pop();
+                const prevData = drawHistory[drawHistory.length - 1];
+                const img = new Image();
+                img.onload = () => {
+                    editorCtx.clearRect(0, 0, els.editorCanvas.width, els.editorCanvas.height);
+                    editorCtx.drawImage(img, 0, 0);
+                };
+                img.src = prevData;
+            } else if (drawHistory.length === 1) {
+                 renderCanvasContent();
+                 drawHistory = [];
+            }
+        }
+
+        // --- Event Listeners Setup ---
+        function setupEventListeners() {
+            // Auth
+            els.authForm.addEventListener('submit', handleLogin);
+            els.btnRegister.addEventListener('click', handleRegister);
+            els.btnLogout.addEventListener('click', () => {
+                signOut(auth).then(() => {
+                    els.authEmail.value = '';
+                    els.authPassword.value = '';
+                    showToast("Вы вышли из аккаунта");
+                });
+            });
+
+            // Main Uploads
+            els.btnUpload.addEventListener('click', () => els.fileUpload.click());
+            els.fileUpload.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    const target = activeAlbumFilter || 'Загрузки';
+                    uploadPhoto(e.target.files[0], target);
+                }
+            });
+
+            // Camera Direct Upload
+            els.cameraUpload.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    uploadPhoto(e.target.files[0], 'Камера');
+                }
+            });
+
+            // Navigation
+            els.btnBackToAlbums.addEventListener('click', () => {
+                switchTab('albums');
+            });
+
+            els.navTabs.forEach(tab => {
+                tab.addEventListener('click', (e) => {
+                    const target = e.currentTarget.dataset.target;
+                    switchTab(target);
+                });
+            });
+
+            // Albums Creation
+            els.btnCreateAlbum.addEventListener('click', () => {
+                els.newAlbumName.value = '';
+                els.createAlbumModal.classList.remove('hidden');
+            });
+
+            els.btnCancelAlbum.addEventListener('click', () => {
+                els.createAlbumModal.classList.add('hidden');
+            });
+
+            els.btnSaveAlbum.addEventListener('click', async () => {
+                const name = els.newAlbumName.value.trim();
+                if (!name) {
+                    showToast("Введите название альбома");
+                    return;
+                }
+                const albumsRef = getAlbumsCollectionRef();
+                try {
+                    await addDoc(albumsRef, { name: name, timestamp: Date.now() });
+                    showToast("Альбом «" + name + "» создан");
+                    els.createAlbumModal.classList.add('hidden');
+                } catch (e) {
+                    console.error("Album creation error:", e);
+                    showToast("Ошибка создания альбома");
+                }
+            });
+
+            // Viewer
+            els.btnViewerClose.addEventListener('click', closeViewer);
+            els.btnViewerDelete.addEventListener('click', () => {
+                deleteCurrentPhoto();
+            });
+
+            els.btnViewerInfo.addEventListener('click', openInfoModal);
+            els.btnInfoClose.addEventListener('click', closeInfoModal);
+            
+            els.infoAlbumSelect.addEventListener('change', (e) => {
+                if (currentViewingPhoto) {
+                    updatePhotoAlbum(currentViewingPhoto.id, e.target.value);
+                }
+            });
+
+            els.btnViewerShare.addEventListener('click', async () => {
+                if(navigator.share && currentViewingPhoto) {
+                    try {
+                        const res = await fetch(currentViewingPhoto.dataUrl);
+                        const blob = await res.blob();
+                        const file = new File([blob], "photo.jpg", { type: "image/jpeg" });
+                        await navigator.share({
+                            title: 'PhotoVerse',
+                            files: [file]
+                        });
+                    } catch (err) {
+                        console.log("Error sharing", err);
+                        showToast("Не удалось поделиться");
+                    }
+                } else {
+                    showToast("Поделиться не поддерживается на этом устройстве");
+                }
+            });
+            
+            // Editor Entry
+            els.btnViewerEdit.addEventListener('click', () => {
+                openEditor();
+            });
+
+            // Editor Logic
+            els.btnEditorCancel.addEventListener('click', closeEditor);
+            els.btnEditorSave.addEventListener('click', async () => {
+                const finalDataUrl = els.editorCanvas.toDataURL('image/jpeg', 0.9);
+                await saveEditedPhoto(finalDataUrl);
+                closeEditor();
+            });
+
+            els.editorTools.forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    activateTool(e.currentTarget.dataset.tool, e.currentTarget);
+                });
+            });
+
+            // Adjustments Tools
+            const updateAdjustments = () => {
+                adjustments.brightness = els.sliderBrightness.value;
+                adjustments.contrast = els.sliderContrast.value;
+                adjustments.saturation = els.sliderSaturation.value;
+                renderCanvasContent();
+            };
+            els.sliderBrightness.addEventListener('input', updateAdjustments);
+            els.sliderContrast.addEventListener('input', updateAdjustments);
+            els.sliderSaturation.addEventListener('input', updateAdjustments);
+            
+            els.btnApplyAdjust.addEventListener('click', () => {
+                const finalDataUrl = els.editorCanvas.toDataURL('image/jpeg', 1.0);
+                baseImageSrc = finalDataUrl;
+                originalImageObj.src = finalDataUrl;
+                adjustments = { brightness: 0, contrast: 0, saturation: 0 };
+                resetEditorUI();
+                originalImageObj.onload = () => {
+                    renderCanvasContent();
+                    saveCanvasState();
+                    deactivateTools();
+                    showToast("Фильтры применены");
+                }
+            });
+
+            // Drawing Tools
+            els.colorPickers.forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    brushColor = e.currentTarget.dataset.color;
+                    updateColorPickers();
+                });
+            });
+            
+            els.sliderBrushSize.addEventListener('input', (e) => {
+                brushSize = e.target.value;
+            });
+            
+            els.btnUndoDraw.addEventListener('click', undoDraw);
+
+            // Canvas Drawing Events
+            els.editorCanvas.addEventListener('mousedown', startDrawing);
+            els.editorCanvas.addEventListener('mousemove', draw);
+            els.editorCanvas.addEventListener('mouseup', stopDrawing);
+            els.editorCanvas.addEventListener('mouseout', stopDrawing);
+
+            els.editorCanvas.addEventListener('touchstart', startDrawing, {passive: false});
+            els.editorCanvas.addEventListener('touchmove', draw, {passive: false});
+            els.editorCanvas.addEventListener('touchend', stopDrawing);
+            els.editorCanvas.addEventListener('touchcancel', stopDrawing);
+        }
+
+        // Run
+        window.addEventListener('DOMContentLoaded', init);
+
+    </script>
+</body>
+</html>
